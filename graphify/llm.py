@@ -21,7 +21,12 @@ def get_llm(model: str | None = None):
             from langchain_community.chat_models import ChatTongyi
         # dashscope_api_key 为空时 ChatTongyi 自动读取环境变量 DASHSCOPE_API_KEY
         api_key = settings.dashscope_api_key or None
-        return ChatTongyi(model=model_name, dashscope_api_key=api_key)
+        # request_timeout 经由 model_kwargs 传给 DashScope SDK（默认 300s 太长，容易卡死流水线）
+        return ChatTongyi(
+            model=model_name,
+            dashscope_api_key=api_key,
+            model_kwargs={"request_timeout": 60},
+        )
     return init_chat_model(model_name)
 
 

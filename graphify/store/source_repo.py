@@ -76,3 +76,8 @@ class InMemorySourceRepo(SourceRepo):
         matched_id: str | None,
     ) -> None:
         self.logs.append({"kb_id": kb_id, "url": url, "level": level, "matched_id": matched_id})
+
+
+# 进程级单例：同一次运行内所有 collect 调用共享同一份已见 URL 表，避免重复抓取同一 URL。
+# 注意：进程退出后状态丢失；生产环境应替换为 SQLite/Redis 持久化实现。
+_default_repo = InMemorySourceRepo()
