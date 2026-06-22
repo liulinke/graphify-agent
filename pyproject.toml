@@ -18,6 +18,9 @@ dependencies = [
     "fastapi>=0.110",
     "uvicorn>=0.29",
     "loguru>=0.7",
+    "langchain-community>=0.4.2",
+    "dashscope>=1.25.23",
+    "langchain-tavily>=0.2.18",
 ]
 
 [project.optional-dependencies]

@@ -4,8 +4,10 @@
 
 ## 功能特性
 
-- **信息采集**：httpx + BeautifulSoup 抓取网页，三层去重（URL / SimHash / 语义）
-- **知识图谱**：LLM 抽取三元组，MERGE 幂等写入 Neo4j，时序快照保留历史
+- **增量采集**：同一知识库可多次运行 `collect`，系统自动跳过已采集的 URL，只处理新内容
+- **三层去重**：URL 规范化 → SimHash 内容指纹 → 语义向量（可选），防止重复内容进入图谱
+- **幂等写入**：所有节点和关系通过 `MERGE` 写入 Neo4j，重复运行不会产生重复节点
+- **时序快照**：随时间变化的数值（股价、销量等）用 `CREATE` 追加快照，历史数据永不覆盖
 - **NL2Cypher**：自然语言查询转 Cypher，内置只读护栏（拦截写操作）
 - **LangGraph 工作流**：plan → discover → dedup → collect → extract → build，支持断点续跑
 - **CLI / REST API**：Typer CLI 调试入口 + FastAPI HTTP 接口
@@ -52,12 +54,47 @@ cp .env.example .env
 # 解析采集指令（不实际采集）
 uv run python -m graphify.cli.main plan kb_demo "采集机器人行业新闻，来源100"
 
-# 端到端采集
+# 端到端采集（首次）
 uv run python -m graphify.cli.main collect kb_demo "采集工业机器人行业新闻"
+
+# 增量采集：再次运行同一指令，已采集 URL 自动跳过，只处理新内容
+uv run python -m graphify.cli.main collect kb_demo "采集工业机器人行业新闻"
+
+# 限制本次最多采集页数（适合快速测试）
+uv run python -m graphify.cli.main collect kb_demo "采集工业机器人行业新闻" --limit 5
 
 # 自然语言查询知识图谱
 uv run python -m graphify.cli.main ask kb_demo "埃斯顿的主要客户有哪些？"
 ```
+
+## 增量采集工作原理
+
+每次 `collect` 运行时，系统按以下三层去重决定是否处理某条 URL：
+
+```
+候选 URL
+   │
+   ▼
+① URL 去重：规范化后与已见 URL 表比对
+   ├─ 完全相同 URL 且内容未变 → 跳过
+   ├─ 相同 URL 但内容已更新 → 写入时序快照（保留历史）
+   └─ 新 URL → 继续
+   │
+   ▼
+② SimHash 内容指纹：与近期采集页面的指纹比对
+   └─ 汉明距离 ≤ 阈值（默认 3）→ 跳过（近似重复内容）
+   │
+   ▼
+③ 语义去重（可选，GRAPHIFY_ENABLE_SEMANTIC_DEDUP=true）
+   └─ 向量相似度 ≥ 阈值 → 跳过
+   │
+   ▼
+通过去重 → LLM 抽取三元组 → MERGE 写入 Neo4j
+```
+
+**写入保证**：
+- 实体/关系：`MERGE` 幂等，同一实体多次采集只存一个节点
+- 时序数值：`CREATE` 追加，每次更新都保留为独立快照，可查看历史变化趋势
 
 ## 开发流程
 
@@ -93,5 +130,6 @@ tests/
 ## 故障排查
 
 - **Neo4j 连接失败**：确认 `GRAPHIFY_NEO4J_*` 环境变量正确，Neo4j 容器已启动
-- **LLM 调用报错**：检查 API KEY（如 `ANTHROPIC_API_KEY`）是否已设置
+- **LLM 调用报错**：检查 API KEY（如 `DASHSCOPE_API_KEY` / `ANTHROPIC_API_KEY`）是否已设置
 - **SimHash 去重过激**：调整 `GRAPHIFY_DEDUP_SIMHASH_THRESHOLD`（默认 3，越小越严格）
+- **增量采集未生效**：进程级去重状态在进程退出后会丢失；如需跨进程持久化去重，需将 `store/source_repo.py` 中的 `_default_repo` 替换为 SQLite/Redis 持久化实现
