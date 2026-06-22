@@ -54,6 +54,9 @@ class GraphDAO:
 
     def append_snapshot(self, kb_id: str, snap: MetricSnapshot) -> None:
         """追加时序快照，用 CREATE 而非 MERGE，保留历史数据。"""
+        # company 为 None 时跳过（LLM 有时输出 null，无法确定归属公司）
+        if not snap.company:
+            return
         with self.driver.session() as s:
             s.run(
                 cql.APPEND_SNAPSHOT,

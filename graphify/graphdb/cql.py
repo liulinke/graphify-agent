@@ -27,10 +27,10 @@ ON CREATE SET r += $props
 
 # 追加时序快照（CREATE 而非 MERGE，保留历史）
 APPEND_SNAPSHOT = """
-MERGE (c:Company {{kb_id:$kb, name:$company}})
-MERGE (m:Metric  {{kb_id:$kb, name:$metric}})
+MERGE (c:Company {kb_id:$kb, name:$company})
+MERGE (m:Metric  {kb_id:$kb, name:$metric})
 MERGE (c)-[:HAS_METRIC]->(m)
-CREATE (m)-[:HAS_SNAPSHOT]->(:MetricSnapshot {{value:$v, ts:date($ts), unit:$unit}})
+CREATE (m)-[:HAS_SNAPSHOT]->(:MetricSnapshot {value:$v, ts:date($ts), unit:$unit})
 """
 
 # 合并来源节点
