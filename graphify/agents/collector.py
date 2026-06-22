@@ -31,11 +31,12 @@ def filter_known_urls(
     repo = repo or SourceRepo()
     fresh: list[str] = []
     for u in urls:
+        # 先检查是否已达上限，避免 limit=0 时仍追加一条
+        if len(fresh) >= limit:
+            break
         nu = normalize_url(u)
         if not repo.url_seen(kb_id, nu):
             fresh.append(u)
-        if len(fresh) >= limit:
-            break
     return fresh
 
 
