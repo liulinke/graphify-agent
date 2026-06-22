@@ -28,6 +28,7 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",          # 忽略未声明的 GRAPHIFY_* 环境变量
     )
 
 

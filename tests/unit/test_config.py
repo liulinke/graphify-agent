@@ -4,9 +4,15 @@ import pytest
 from graphify.config import Settings
 
 
-def test_default_values():
-    """所有字段应有合理默认值，不依赖环境变量。"""
-    cfg = Settings()
+def test_default_values(monkeypatch):
+    """所有字段应有合理默认值（隔离环境变量，避免 CI/Docker 环境值污染）。"""
+    # 清除所有 GRAPHIFY_* 前缀的环境变量，确保测试只看默认值
+    import os
+    for key in list(os.environ):
+        if key.upper().startswith("GRAPHIFY_"):
+            monkeypatch.delenv(key, raising=False)
+
+    cfg = Settings(_env_file=None)   # 同时禁用 .env 文件读取
     assert cfg.neo4j_uri == "bolt://localhost:7687"
     assert cfg.neo4j_user == "neo4j"
     assert cfg.neo4j_password == "password"
