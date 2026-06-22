@@ -116,3 +116,22 @@ def test_partial_json_returns_empty_result() -> None:
     res = extract(item, llm=bad_llm)
     assert isinstance(res, ExtractionResult)
     assert res.entities == []
+
+
+# ════════════════════════════════════════════════════════════════
+# 七、网络错误时返回空 ExtractionResult（不崩溃）
+# ════════════════════════════════════════════════════════════════
+
+class _NetworkErrorLLM:
+    """模拟 DashScope / 任意 LLM 在 invoke 时抛网络异常的替身。"""
+    def invoke(self, msgs):
+        raise ConnectionError("Remote end closed connection without response")
+
+
+def test_network_error_returns_empty_result() -> None:
+    """LLM invoke 抛 ConnectionError 时，extract 应返回空 ExtractionResult，不传播异常。"""
+    item = {"url": "https://example.com/net-err", "text": "正文"}
+    res = extract(item, llm=_NetworkErrorLLM())
+    assert isinstance(res, ExtractionResult)
+    assert res.entities == []
+    assert res.source_url == "https://example.com/net-err"

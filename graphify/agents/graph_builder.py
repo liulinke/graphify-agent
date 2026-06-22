@@ -52,21 +52,23 @@ def extract(item: dict, llm=None) -> ExtractionResult:
     """从单篇正文中 LLM 抽取三元组，支持注入 FakeLLM 替身。
 
     使用 prompt-based JSON 输出，兼容 qwen-plus 工具调用截断的问题。
+    网络错误或 JSON 解析失败时返回空 ExtractionResult，不中断整批处理。
     """
     from graphify.llm import get_llm
+    from loguru import logger
     llm = llm or get_llm()
 
-    msg = llm.invoke([
-        ("system", _EXTRACT_SYS),
-        ("human", item["text"][:8000]),  # 截取前 8000 字，避免超出 context window
-    ])
-    raw = msg.content if hasattr(msg, "content") else str(msg)
-
     try:
+        msg = llm.invoke([
+            ("system", _EXTRACT_SYS),
+            ("human", item["text"][:8000]),  # 截取前 8000 字，避免超出 context window
+        ])
+        raw = msg.content if hasattr(msg, "content") else str(msg)
         data = json.loads(_extract_json(raw))
         res = ExtractionResult.model_validate(data)
-    except Exception:
-        # JSON 解析失败时返回空结果，不中断整批处理
+    except Exception as exc:
+        # 网络错误、LLM 调用失败或 JSON 解析错误均降级为空结果，不中断整批处理
+        logger.warning(f"extract 失败，返回空结果：url={item.get('url')!r}, err={exc}")
         res = ExtractionResult()
 
     res.source_url = item["url"]
