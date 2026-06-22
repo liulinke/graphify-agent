@@ -32,6 +32,12 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("GRAPHIFY_DASHSCOPE_API_KEY", "DASHSCOPE_API_KEY"),
     )
 
+    # Tavily Search API Key：优先读 GRAPHIFY_TAVILY_API_KEY，回退到 TAVILY_API_KEY
+    tavily_api_key: str = Field(
+        default="",
+        validation_alias=AliasChoices("GRAPHIFY_TAVILY_API_KEY", "TAVILY_API_KEY"),
+    )
+
     # 去重阈值
     dedup_simhash_threshold: int = 3          # SimHash 汉明距离上限（≤ 此值视为重复）
     dedup_semantic_threshold: float = 0.95    # 语义相似度上限（≥ 此值视为重复）
