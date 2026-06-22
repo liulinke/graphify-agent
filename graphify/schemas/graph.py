@@ -22,7 +22,7 @@ class Relation(BaseModel):
 
 class MetricSnapshot(BaseModel):
     """时序指标快照（如股价、销量），只追加不覆盖历史。"""
-    company: str
+    company: Optional[str] = None   # LLM 有时输出 null，容忍并保留为 None
     metric: str         # "股价" / "销量"
     value: float
     ts: str             # ISO date（如 "2026-06-22"）

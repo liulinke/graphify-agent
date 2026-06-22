@@ -41,15 +41,22 @@ def dedup(kb_id: str, url: str) -> None:
 
 
 @app.command()
-def collect(kb_id: str, instruction: str, dry_run: bool = False) -> None:
+def collect(
+    kb_id: str,
+    instruction: str,
+    dry_run: bool = False,
+    limit: int = typer.Option(0, "--limit", "-l", help="覆盖计划中的 source_limit（0=由LLM计划决定）"),
+) -> None:
     """端到端运行采集工作流（含图谱写入）。"""
     from graphify.graph_workflow import build_workflow
     from langgraph.checkpoint.memory import MemorySaver
+    # --limit 非零时注入到指令中，让 planner 解析为 source_limit
+    effective_instruction = f"{instruction}，来源{limit}" if limit > 0 else instruction
     # 运行时用内存 checkpointer；如需持久化可替换为 SqliteSaver
     checkpointer = MemorySaver()
     wf = build_workflow(checkpointer=checkpointer)
     out = wf.invoke(
-        {"kb_id": kb_id, "instruction": instruction},
+        {"kb_id": kb_id, "instruction": effective_instruction},
         config={"configurable": {"thread_id": f"{kb_id}-cli"}},
     )
     typer.echo(json.dumps(out["report"], ensure_ascii=False, indent=2))
