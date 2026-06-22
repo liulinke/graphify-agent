@@ -44,13 +44,14 @@ def dedup(kb_id: str, url: str) -> None:
 def collect(kb_id: str, instruction: str, dry_run: bool = False) -> None:
     """端到端运行采集工作流（含图谱写入）。"""
     from graphify.graph_workflow import build_workflow
-    from langgraph.checkpoint.sqlite import SqliteSaver
-    with SqliteSaver.from_conn_string("checkpoints.db") as checkpointer:
-        wf = build_workflow(checkpointer=checkpointer)
-        out = wf.invoke(
-            {"kb_id": kb_id, "instruction": instruction},
-            config={"configurable": {"thread_id": f"{kb_id}-cli"}},
-        )
+    from langgraph.checkpoint.memory import MemorySaver
+    # 运行时用内存 checkpointer；如需持久化可替换为 SqliteSaver
+    checkpointer = MemorySaver()
+    wf = build_workflow(checkpointer=checkpointer)
+    out = wf.invoke(
+        {"kb_id": kb_id, "instruction": instruction},
+        config={"configurable": {"thread_id": f"{kb_id}-cli"}},
+    )
     typer.echo(json.dumps(out["report"], ensure_ascii=False, indent=2))
 
 
