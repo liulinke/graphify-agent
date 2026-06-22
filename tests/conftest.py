@@ -1,79 +1,110 @@
-# 全局测试固件：FakeLLM、FakeDAO、sample_plan（设计文档 10.2 节）
+# 全局测试固件：FakeLLM、FakeDAO、常用 fixture（设计文档 10.2 节）
 from __future__ import annotations
 import pytest
 from typing import Any
-from langchain_core.language_models.fake_chat_models import FakeListChatModel
-from graphify.schemas.plan import CollectPlan
+from graphify.schemas.plan import CollectPlan, SupplyChain
 from graphify.schemas.graph import Entity, ExtractionResult
 
 
 # ────────────────────────── FakeLLM ──────────────────────────
 
-class FakeLLM(FakeListChatModel):
-    """按顺序返回预设回复的 LLM 替身，外部依赖零调用。
+class FakeLLM:
+    """可编程的 LLM 替身，支持普通 invoke 与 with_structured_output 两种调用路径。
 
     用法：
-        llm = FakeLLM(responses=["MATCH (n) RETURN n LIMIT 10"])
+        # 结构化输出
+        llm = FakeLLM(payload=some_pydantic_obj)
+        result = llm.with_structured_output(Schema).invoke(msgs)  # → some_pydantic_obj
+
+        # 普通文本输出
+        llm = FakeLLM(payload="MATCH (n) RETURN n LIMIT 10")
+        result = llm.invoke(msgs)  # → 伪 message，.content == "MATCH ..."
     """
-    pass
+
+    def __init__(self, payload: Any) -> None:
+        self.payload = payload
+        self._structured = False
+
+    def with_structured_output(self, schema: type) -> "FakeLLM":
+        """返回自身，标记下次 invoke 走结构化路径。"""
+        self._schema = schema
+        self._structured = True
+        return self
+
+    def invoke(self, msgs: Any) -> Any:
+        if self._structured:
+            self._structured = False  # 重置，避免污染后续调用
+            return self.payload
+
+        # 普通 invoke：包装成有 .content 属性的假消息
+        class _Msg:
+            def __init__(self, content: str) -> None:
+                self.content = content
+
+        return _Msg(self.payload)
 
 
 # ────────────────────────── FakeDAO ──────────────────────────
 
 class FakeDAO:
-    """内存实现的 GraphDAO 替身，记录所有调用，不连接 Neo4j。"""
+    """内存实现的 GraphDAO 替身，记录所有调用，不连接 Neo4j。
+
+    属性名与设计文档 10.2 节保持一致：
+        snapshots   — append_snapshot 写入的快照列表
+        entities    — resolve_and_merge_entity 写入的实体列表
+        relations   — merge_relation 写入的关系列表
+        read_rows   — run_read 返回的预设行（测试中可直接赋值）
+    """
 
     def __init__(self) -> None:
-        # 用于断言测试：记录各方法被调用的参数
+        self.snapshots: list = []
+        self.entities: list = []
+        self.relations: list = []
+        self.read_rows: list[dict] = []
+        # 额外记录 merge_source / link_source 调用，供细粒度断言
         self.merged_sources: list[str] = []
-        self.merged_entities: list[tuple] = []
         self.linked_sources: list[tuple] = []
-        self.merged_relations: list[tuple] = []
-        self.appended_snapshots: list[tuple] = []
-        self.read_calls: list[tuple] = []
 
-    def merge_source(self, url: str) -> int:
-        """模拟 MERGE NewsArticle 节点，返回自增 id。"""
+    def merge_source(self, url: str) -> dict:
+        """模拟 MERGE NewsArticle 节点，返回含 url 的字典。"""
         self.merged_sources.append(url)
-        return len(self.merged_sources)
+        return {"url": url}
 
     def resolve_and_merge_entity(self, kb_id: str, entity: Any) -> int:
         """模拟实体消歧 + MERGE，返回自增 id。"""
-        self.merged_entities.append((kb_id, entity))
-        return len(self.merged_entities)
+        self.entities.append(entity)
+        return len(self.entities)
 
-    def link_source(self, node_id: int, source_id: int) -> None:
+    def link_source(self, node_id: Any, source: Any) -> None:
         """模拟 MERGE MENTIONED_IN 关系。"""
-        self.linked_sources.append((node_id, source_id))
+        self.linked_sources.append((node_id, source))
 
     def merge_relation(self, kb_id: str, rel: Any) -> None:
         """模拟关系写入。"""
-        self.merged_relations.append((kb_id, rel))
+        self.relations.append(rel)
 
     def append_snapshot(self, kb_id: str, snap: Any) -> None:
-        """模拟时序快照追加（CREATE，不覆盖）。"""
-        self.appended_snapshots.append((kb_id, snap))
+        """模拟时序快照追加（CREATE，不覆盖历史）。"""
+        self.snapshots.append(snap)
 
     def run_read(self, cypher: str, params: dict | None = None) -> list[dict]:
-        """模拟只读查询，返回空列表（测试中可 monkeypatch 替换）。"""
-        self.read_calls.append((cypher, params))
-        return []
+        """返回预设 read_rows，测试中可直接赋值覆盖。"""
+        return self.read_rows
 
     def expand_node(self, kb_id: str, node_id: int, rel_types: list[str]) -> list[dict]:
-        """模拟节点展开查询。"""
+        """模拟节点展开查询，默认返回空列表。"""
         return []
 
     def close(self) -> None:
         """无需关闭连接。"""
-        pass
 
 
 # ────────────────────────── Fixtures ──────────────────────────
 
 @pytest.fixture
 def fake_llm() -> FakeLLM:
-    """默认返回空字符串的 FakeLLM 实例，测试中可覆盖 responses。"""
-    return FakeLLM(responses=[""])
+    """默认 payload 为空字符串的 FakeLLM 实例。"""
+    return FakeLLM(payload="")
 
 
 @pytest.fixture
@@ -84,23 +115,21 @@ def fake_dao() -> FakeDAO:
 
 @pytest.fixture
 def sample_plan() -> CollectPlan:
-    """用于测试的标准采集计划。"""
+    """标准采集计划 fixture（含上下游）。"""
     return CollectPlan(
-        kb_id="kb_test_001",
-        domain="机器人",
-        topics=["工业机器人", "协作机器人"],
+        kb_id="kb1",
+        domain="机器人/股票",
+        topics=["机器人", "股票"],
         include_supply_chain=True,
-        region="CN",
-        source_limit=10,
+        supply_chain=SupplyChain(upstream=["伺服电机"], downstream=["物流"]),
+        source_limit=100,
     )
 
 
 @pytest.fixture
 def sample_extraction() -> ExtractionResult:
-    """用于测试的标准抽取结果，包含一个高置信度实体。"""
+    """标准抽取结果 fixture，包含一个高置信度实体。"""
     return ExtractionResult(
         entities=[Entity(label="Company", name="埃斯顿", confidence=0.9)],
-        relations=[],
-        snapshots=[],
         source_url="https://example.com/news/1",
     )
