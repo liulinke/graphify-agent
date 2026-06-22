@@ -27,8 +27,8 @@ def filter_known_urls(
     repo=None,
 ) -> list[str]:
     """URL 级去重：过滤已采集的 URL，返回最多 limit 条新鲜 URL。"""
-    from graphify.store.source_repo import SourceRepo
-    repo = repo or SourceRepo()
+    from graphify.store.source_repo import InMemorySourceRepo
+    repo = repo or InMemorySourceRepo()
     fresh: list[str] = []
     for u in urls:
         # 先检查是否已达上限，避免 limit=0 时仍追加一条

@@ -86,6 +86,17 @@ def test_search_term_handles_exception_gracefully() -> None:
     assert urls == []
 
 
+def test_search_term_handles_error_dict_response() -> None:
+    """Tavily 内部异常时返回 {"error": ...} dict，应被检测到并返回空列表。
+
+    这是 TavilySearch._run 遇到 SSLError 等网络异常时的实际行为。
+    """
+    tavily = MagicMock()
+    tavily.invoke.return_value = {"error": Exception("SSL EOF")}
+    urls = _search_term(tavily, "工业机器人")
+    assert urls == []
+
+
 def test_search_term_skips_empty_url_string() -> None:
     """url 字段为空字符串的条目应被跳过。"""
     tavily = _make_tavily_mock([

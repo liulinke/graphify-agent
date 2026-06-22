@@ -89,7 +89,6 @@ def check_duplicate(kb_id: str, url: str, text: str) -> dict:
     返回 {is_duplicate, level, matched_source_id, changed}。
     changed=True 表示同 URL 内容已变，collector 应走时序快照更新。
     """
-    from graphify.store.source_repo import SourceRepo
-    # 生产路径使用真实 SourceRepo（TODO: 替换为数据库实现）
-    # 测试路径通过 monkeypatch 或直接调用 check_duplicate_impl 注入替身
-    return check_duplicate_impl(kb_id, url, text, SourceRepo())
+    from graphify.store.source_repo import InMemorySourceRepo
+    # 生产路径暂用 InMemorySourceRepo（进程内去重）；TODO: 替换为持久化数据库实现
+    return check_duplicate_impl(kb_id, url, text, InMemorySourceRepo())
