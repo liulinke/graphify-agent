@@ -47,6 +47,10 @@ class Settings(BaseSettings):
     fetch_timeout_s: int = 30                 # 单页抓取超时（秒）
     fetch_max_retries: int = 3                # 最大重试次数
 
+    # 是否信任系统/环境代理（macOS 系统代理不稳定时会导致
+    # Tavily/DashScope 间歇性 SSL 断连，默认 False = 全部直连）
+    trust_env_proxy: bool = False
+
     model_config = SettingsConfigDict(
         env_prefix="GRAPHIFY_",
         env_file=".env",
@@ -59,3 +63,17 @@ class Settings(BaseSettings):
 
 # 单例：模块加载时读取一次，测试中可用 Settings(...) 构造隔离实例
 settings = Settings()
+
+
+def apply_proxy_policy(s: Settings | None = None) -> None:
+    """按配置应用代理策略，应在 CLI / API 入口显式调用一次。
+
+    trust_env_proxy=False（默认）时设置 NO_PROXY=*，让 requests/httpx
+    忽略系统代理直连——不稳定的本地代理（如 127.0.0.1:1087）会造成
+    DashScope/Tavily 间歇性 Broken pipe / SSL EOF 错误。
+    """
+    import os
+    s = s or settings
+    if not s.trust_env_proxy:
+        os.environ["NO_PROXY"] = "*"
+        os.environ["no_proxy"] = "*"

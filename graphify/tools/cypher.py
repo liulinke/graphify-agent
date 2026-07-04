@@ -13,8 +13,9 @@ _WRITE_RE = re.compile(
 # LIMIT 后必须跟数字（防止 "LIMIT" 仅出现在注释或字符串中）
 _LIMIT_RE = re.compile(r"\bLIMIT\s+\d+", re.IGNORECASE)
 
-# kb_id 出现在 Cypher 中（属性过滤或参数名均算）
-_KB_ID_RE = re.compile(r"\bkb_id\b", re.IGNORECASE)
+# kb_id 必须以参数化比较形式出现（n.kb_id = $kb_id 或 {kb_id:$kb_id}），
+# 仅在 RETURN 中出现 kb_id（如 RETURN c.kb_id）不算过滤，防止越权查询
+_KB_ID_RE = re.compile(r"\bkb_id\s*[:=]\s*\$kb_id\b", re.IGNORECASE)
 
 
 # ── 单项检查函数 ──────────────────────────────────────────────
@@ -30,7 +31,7 @@ def has_limit(cypher: str) -> bool:
 
 
 def has_kb_id_filter(cypher: str) -> bool:
-    """Cypher 含 kb_id 属性或参数则返回 True。"""
+    """Cypher 含参数化 kb_id 过滤（kb_id = $kb_id）则返回 True。"""
     return bool(_KB_ID_RE.search(cypher))
 
 

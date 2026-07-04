@@ -8,6 +8,9 @@ from graphify.config import settings
 # 单次查询最多返回条数；Tavily 免费层上限 20
 _MAX_RESULTS_PER_TERM = 20
 
+# 瞬时网络错误的重试退避秒数（测试中可 monkeypatch 为 (0, 0) 加速）
+_RETRY_BACKOFF_S: tuple[float, float] = (1.0, 2.0)
+
 
 def _build_tavily():
     """构造 TavilySearch 实例；未配置 API key 时返回 None。
@@ -31,30 +34,36 @@ def _build_tavily():
 def _search_term(tavily, term: str) -> list[str]:
     """对单个搜索词调用 Tavily，返回结果 URL 列表。
 
-    Tavily 内部异常时会把 {"error": <exc>} 作为 dict 返回而非抛出，
-    此处显式检测并打印警告，避免静默丢失错误。
+    - Tavily 内部异常时会把 {"error": <exc>} 作为 dict 返回而非抛出，
+      此处显式检测并打印警告，避免静默丢失错误。
+    - 瞬时网络错误（SSL 断连、代理故障等）自动重试 2 次，重试耗尽才放弃。
     """
-    try:
-        result = tavily.invoke(term)
+    import time
+    for attempt in range(3):  # 最多尝试 3 次（首次 + 重试 2 次）
+        error: object = None
+        try:
+            result = tavily.invoke(term)
+            # Tavily 把内部异常封装成 {"error": ...} dict 返回（不抛异常）
+            if isinstance(result, dict) and "error" in result:
+                error = result["error"]
+            else:
+                urls = [
+                    r["url"]
+                    for r in result.get("results", [])
+                    if isinstance(r, dict) and r.get("url")
+                ]
+                logger.debug(f"Tavily term={term!r}: {len(urls)} 条结果")
+                return urls
+        except Exception as exc:
+            error = exc
 
-        # Tavily 把内部异常封装成 {"error": ...} dict 返回（不抛异常）
-        if isinstance(result, dict) and "error" in result:
-            logger.warning(
-                f"Tavily 搜索返回错误：term={term!r}, error={result['error']}"
-            )
-            return []
-
-        urls = [
-            r["url"]
-            for r in result.get("results", [])
-            if isinstance(r, dict) and r.get("url")
-        ]
-        logger.debug(f"Tavily term={term!r}: {len(urls)} 条结果")
-        return urls
-
-    except Exception as exc:
-        logger.warning(f"Tavily 搜索异常：term={term!r}, err={exc}")
-        return []
+        if attempt < 2:
+            delay = _RETRY_BACKOFF_S[attempt]
+            logger.warning(f"Tavily 搜索第 {attempt + 1} 次失败，{delay}s 后重试：term={term!r}, err={error}")
+            time.sleep(delay)
+        else:
+            logger.warning(f"Tavily 搜索重试耗尽，放弃：term={term!r}, err={error}")
+    return []
 
 
 @tool

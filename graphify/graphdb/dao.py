@@ -16,6 +16,8 @@ class GraphDAO:
             driver = GraphDatabase.driver(
                 settings.neo4j_uri,
                 auth=(settings.neo4j_user, settings.neo4j_password),
+                # 关闭服务端通知（DEPRECATION 等 WARNING 会刷屏污染 CLI 输出）
+                notifications_min_severity="OFF",
             )
         self.driver = driver
 
@@ -27,16 +29,19 @@ class GraphDAO:
             result = s.run(cql.MERGE_SOURCE, url=url)
             return result.single()["s"]
 
-    def link_source(self, node_id: int, source: dict) -> None:
-        """将实体节点与来源节点关联（CITED_BY）。"""
-        q = "MATCH (n) WHERE id(n)=$nid MATCH (s:Source {url:$url}) MERGE (n)-[:CITED_BY]->(s)"
+    def link_source(self, node_id: str, source: dict) -> None:
+        """将实体节点与来源节点关联（CITED_BY）。
+
+        node_id 为 elementId() 返回的字符串 ID（Neo4j 2025+ 弃用整数 id()）。
+        """
+        q = "MATCH (n) WHERE elementId(n)=$nid MATCH (s:Source {url:$url}) MERGE (n)-[:CITED_BY]->(s)"
         with self.driver.session() as s:
             s.run(q, nid=node_id, url=source["url"])
 
     # ── 实体 ─────────────────────────────────────────────────────────────────
 
-    def resolve_and_merge_entity(self, kb_id: str, ent: Entity) -> int:
-        """消歧 + MERGE 实体节点，返回内部节点 ID。"""
+    def resolve_and_merge_entity(self, kb_id: str, ent: Entity) -> str:
+        """消歧 + MERGE 实体节点，返回 elementId 字符串。"""
         q = cql.MERGE_ENTITY_TMPL.format(label=ent.label)
         with self.driver.session() as s:
             result = s.run(q, kb=kb_id, name=ent.name, props=ent.props)
@@ -75,10 +80,10 @@ class GraphDAO:
         with self.driver.session(default_access_mode="READ") as s:
             return [r.data() for r in s.run(cypher, **params)]
 
-    def expand_node(self, kb_id: str, node_id: int, rel_types: list[str], limit: int = 50) -> list[dict]:
-        """展开指定节点的邻居（用于图形化探索）。"""
+    def expand_node(self, kb_id: str, node_id: str, rel_types: list[str], limit: int = 50) -> list[dict]:
+        """展开指定节点的邻居（用于图形化探索），node_id 为 elementId 字符串。"""
         q = (
-            "MATCH (n)-[r]-(m) WHERE id(n)=$id AND type(r) IN $types "
+            "MATCH (n)-[r]-(m) WHERE elementId(n)=$id AND type(r) IN $types "
             "RETURN n, r, m LIMIT $limit"
         )
         return self.run_read(q, {"id": node_id, "types": rel_types, "limit": limit})

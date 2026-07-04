@@ -123,15 +123,88 @@ def test_partial_json_returns_empty_result() -> None:
 # ════════════════════════════════════════════════════════════════
 
 class _NetworkErrorLLM:
-    """模拟 DashScope / 任意 LLM 在 invoke 时抛网络异常的替身。"""
+    """模拟 DashScope / 任意 LLM 在 invoke 时抛网络异常的替身，记录调用次数。"""
+    def __init__(self) -> None:
+        self.calls = 0
+
     def invoke(self, msgs):
+        self.calls += 1
         raise ConnectionError("Remote end closed connection without response")
 
 
-def test_network_error_returns_empty_result() -> None:
-    """LLM invoke 抛 ConnectionError 时，extract 应返回空 ExtractionResult，不传播异常。"""
+def test_network_error_returns_empty_result(monkeypatch) -> None:
+    """LLM invoke 持续抛 ConnectionError 时，extract 重试耗尽后应返回空结果，不传播异常。"""
+    # 退避调零，避免单元测试真实 sleep
+    monkeypatch.setattr("graphify.agents.graph_builder._RETRY_BACKOFF_S", (0, 0))
     item = {"url": "https://example.com/net-err", "text": "正文"}
-    res = extract(item, llm=_NetworkErrorLLM())
+    llm = _NetworkErrorLLM()
+    res = extract(item, llm=llm)
     assert isinstance(res, ExtractionResult)
     assert res.entities == []
     assert res.source_url == "https://example.com/net-err"
+    assert llm.calls == 3  # 首次 + 重试 2 次
+
+
+class _FlakyLLM:
+    """前 N 次抛网络异常、之后返回正常 JSON 的替身（模拟瞬时代理断连）。"""
+    def __init__(self, fail_times: int, payload: str) -> None:
+        self.fail_times = fail_times
+        self.payload = payload
+        self.calls = 0
+
+    def invoke(self, msgs):
+        self.calls += 1
+        if self.calls <= self.fail_times:
+            raise ConnectionError("Broken pipe")
+
+        class _M:
+            pass
+
+        m = _M()
+        m.content = self.payload
+        return m
+
+
+def test_invalid_snapshot_does_not_discard_whole_page() -> None:
+    """个别脏快照（value=null）只跳过该条，同页实体/关系必须保留。"""
+    payload = (
+        '{"entities": [{"label": "Company", "name": "宇树科技", "props": {}, "confidence": 0.9}],'
+        ' "relations": [],'
+        ' "snapshots": ['
+        '   {"company": "宇树科技", "metric": "估值", "value": null, "ts": "2026-06-01", "unit": "亿元"},'
+        '   {"company": "宇树科技", "metric": "股价", "value": 12.5, "ts": "2026-06-01", "unit": "元"}'
+        ' ]}'
+    )
+    res = extract({"url": "https://x.com/", "text": "正文"}, llm=FakeLLM(payload=payload))
+    assert len(res.entities) == 1          # 实体不受脏快照影响
+    assert len(res.snapshots) == 1         # 只保留合法快照
+    assert res.snapshots[0].value == 12.5
+
+
+def test_schema_violating_labels_filtered() -> None:
+    """schema 外的标签（如 Technology）和关系类型应被过滤，合法条目保留。"""
+    payload = (
+        '{"entities": ['
+        '   {"label": "Company", "name": "宇树科技", "props": {}, "confidence": 0.9},'
+        '   {"label": "Technology", "name": "强化学习", "props": {}, "confidence": 0.9}'
+        ' ],'
+        ' "relations": ['
+        '   {"type": "SUPPLIES", "source_name": "A", "target_name": "B", "props": {}, "confidence": 0.8},'
+        '   {"type": "USES_TECH", "source_name": "A", "target_name": "C", "props": {}, "confidence": 0.8}'
+        ' ],'
+        ' "snapshots": []}'
+    )
+    res = extract({"url": "https://x.com/", "text": "正文"}, llm=FakeLLM(payload=payload))
+    assert [e.label for e in res.entities] == ["Company"]     # Technology 被过滤
+    assert [r.type for r in res.relations] == ["SUPPLIES"]    # USES_TECH 被过滤
+
+
+def test_transient_network_error_retried(monkeypatch) -> None:
+    """瞬时网络错误应自动重试，第二次成功即返回正常抽取结果。"""
+    monkeypatch.setattr("graphify.agents.graph_builder._RETRY_BACKOFF_S", (0, 0))
+    payload = '{"entities": [{"label": "Company", "name": "宇树科技", "props": {}, "confidence": 0.9}], "relations": [], "snapshots": []}'
+    llm = _FlakyLLM(fail_times=1, payload=payload)
+    res = extract({"url": "https://x.com/", "text": "正文"}, llm=llm)
+    assert llm.calls == 2
+    assert len(res.entities) == 1
+    assert res.entities[0].name == "宇树科技"

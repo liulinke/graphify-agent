@@ -41,3 +41,24 @@ def test_case_insensitive_env(monkeypatch):
     monkeypatch.setenv("GRAPHIFY_NEO4J_PASSWORD", "secret123")
     cfg = Settings()
     assert cfg.neo4j_password == "secret123"
+
+
+def test_apply_proxy_policy_disables_proxy_by_default(monkeypatch):
+    """trust_env_proxy 默认 False，apply_proxy_policy 应设置 NO_PROXY=* 直连。"""
+    from graphify.config import apply_proxy_policy
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    import os
+    apply_proxy_policy(Settings(_env_file=None))
+    assert os.environ["NO_PROXY"] == "*"
+    assert os.environ["no_proxy"] == "*"
+
+
+def test_apply_proxy_policy_respects_trust_env(monkeypatch):
+    """trust_env_proxy=True 时不应改写 NO_PROXY（保留系统代理）。"""
+    from graphify.config import apply_proxy_policy
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+    import os
+    apply_proxy_policy(Settings(_env_file=None, trust_env_proxy=True))
+    assert "NO_PROXY" not in os.environ

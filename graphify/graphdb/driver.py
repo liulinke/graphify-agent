@@ -13,6 +13,8 @@ def get_driver() -> Driver:
         _driver = GraphDatabase.driver(
             settings.neo4j_uri,
             auth=(settings.neo4j_user, settings.neo4j_password),
+            # 关闭服务端通知（避免 DEPRECATION 等 WARNING 刷屏）
+            notifications_min_severity="OFF",
         )
     return _driver
 

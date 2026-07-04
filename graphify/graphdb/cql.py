@@ -11,11 +11,12 @@ CREATE CONSTRAINT source_url IF NOT EXISTS
 """
 
 # 合并实体模板（动态拼接 label）
+# 注意：Neo4j 2025+ 已弃用 id()，统一使用 elementId()（返回字符串 ID）
 MERGE_ENTITY_TMPL = """
 MERGE (n:{label} {{kb_id:$kb, name:$name}})
 ON CREATE SET n += $props, n.created_at=datetime()
 ON MATCH  SET n += $props
-RETURN id(n) AS id
+RETURN elementId(n) AS id
 """
 
 # 合并关系模板（动态拼接 type）

@@ -6,6 +6,12 @@ from unittest.mock import MagicMock, patch
 from graphify.tools.search import _build_tavily, _search_term, search_urls
 
 
+@pytest.fixture(autouse=True)
+def _no_backoff(monkeypatch):
+    """失败重试的退避调零，避免单元测试真实 sleep。"""
+    monkeypatch.setattr("graphify.tools.search._RETRY_BACKOFF_S", (0, 0))
+
+
 # ════════════════════════════════════════════════════════════════
 # 一、_build_tavily：API key 存在/缺失时的工厂行为
 # ════════════════════════════════════════════════════════════════
@@ -95,6 +101,18 @@ def test_search_term_handles_error_dict_response() -> None:
     tavily.invoke.return_value = {"error": Exception("SSL EOF")}
     urls = _search_term(tavily, "工业机器人")
     assert urls == []
+
+
+def test_search_term_retries_transient_error() -> None:
+    """瞬时网络错误应重试；第二次成功时返回正常结果。"""
+    tavily = MagicMock()
+    tavily.invoke.side_effect = [
+        {"error": Exception("SSL EOF")},                       # 第一次失败
+        {"results": [{"url": "http://ok.com"}], "query": "t"}  # 第二次成功
+    ]
+    urls = _search_term(tavily, "机器人")
+    assert urls == ["http://ok.com"]
+    assert tavily.invoke.call_count == 2
 
 
 def test_search_term_skips_empty_url_string() -> None:
